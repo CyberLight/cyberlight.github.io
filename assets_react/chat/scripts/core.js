@@ -1341,7 +1341,7 @@ function RunIncomingMessages(){
         'An SEO expert walks into a bar, bars, pub, tavern, public house, Irish pub, drinks, beer, alcohol'
     ];
     function getRandomItem (arr) {
-        var count = 2 || arr.length;
+        var count = arr.length;
         return arr[Math.floor(Math.random() * count)];
     }
     var index = 0;
@@ -1355,5 +1355,5 @@ function RunIncomingMessages(){
             'text',
             date);
         index++;
-    }, 1000);
+    }, 2000);
 }
