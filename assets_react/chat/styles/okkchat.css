@@ -52,6 +52,9 @@ body {
 .people-list img {
     float: left;
 }
+.people-list .contact {
+    cursor: pointer;
+}
 .people-list .about {
     float: left;
     margin-top: 8px;
@@ -459,7 +462,7 @@ body {
 }
 
 .chat .messages-unread {
-    border-bottom: red 1px solid;
+    border-top: red 1px solid;
     padding: 10px 0 0;
     margin-bottom: 10px;
 }
@@ -469,4 +472,10 @@ body {
     color: white;
     background-color: red;
     border-radius: 10px 10px 0 0;
+    position: absolute;
+    top: -25px;
+}
+
+.chat .message-container {
+    position: relative;
 }
