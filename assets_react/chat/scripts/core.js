@@ -960,16 +960,16 @@ var UploadImageButton = React.createClass({
     },
     render: function() {
         return (
-                <i className={this.props.classes} style={{ position: 'relative'  }}>
-                    <form action='#'>
+            <i className={this.props.classes} style={{ position: 'relative'  }}>
+                <form action='#'>
                     <input style={{ opacity: 0, zIndex: 2, left: 0, top: 0, width: '100%', position: 'absolute' }}
                            ref="fileUpload"
                            type="file"
                            accept="image/*"
                            onChange={this._onFileChange}/>
-                    </form>
-                    <canvas ref="imageCanvas" style={{ display: 'none' }}></canvas>
-                </i>
+                </form>
+                <canvas ref="imageCanvas" style={{ display: 'none' }}></canvas>
+            </i>
         );
     }
 });
