@@ -75,6 +75,11 @@ var _contacts = {
     }
 };
 
+var _fullMessageImages = {
+};
+
+window._fullMessageImages = _fullMessageImages;
+
 var _activeContactId,
     _preActiveContactId,
     _contactFilterPattern = '';
@@ -84,7 +89,8 @@ var ChatConstants = {
     MESSAGE_CHANGE_EVENT: 'MESSAGE_CHANGED_EVENT',
     CONTACT_SELECT_EVENT: 'CONTACT_SELECT_EVENT',
     MESSAGE_UPDATE_EVENT: 'MESSAGE_UPDATE_EVENT',
-    CONTACTS_CHANGE_EVENT: 'CONTACTS_CHANGE_EVENT'
+    CONTACTS_CHANGE_EVENT: 'CONTACTS_CHANGE_EVENT',
+    FULL_IMAGES_CHANGE_EVENT: 'FULL_IMAGES_CHANGE_EVENT'
 };
 
 var ActionTypes = {
@@ -102,6 +108,37 @@ var KeyConstants = {
 };
 
 /*============================ Store =================================*/
+var FullImageChatStore = objectAssign({}, EventEmitter.prototype, {
+
+    emitChange: function() {
+        this.emit(ChatConstants);
+    },
+
+    /**
+     * @param {function} callback
+     */
+    addChangeListener: function(callback) {
+        this.on(ChatConstants.FULL_IMAGES_CHANGE_EVENT, callback);
+    },
+
+    /**
+     * @param {function} callback
+     */
+    removeChangeListener: function(callback) {
+        this.removeListener(ChatConstants.FULL_IMAGES_CHANGE_EVENT, callback);
+    },
+
+    putFullImage: function(id, b64string){
+        if(b64string) {
+            _fullMessageImages[id] = b64string;
+        }
+    },
+
+    getFullImage: function(id) {
+        return _fullMessageImages[id];
+    }
+});
+
 var UnreadChatMessageStore = objectAssign({}, EventEmitter.prototype, {
 
     emitChange: function() {
@@ -388,6 +425,8 @@ ChatMessageStore.dispatchToken = ChatDispatcher.register(function(action) {
             );
             activeContactId = ChatContactsStore.getActive();
             ChatMessageStore.addMessage(action.receiver.name, message, activeContactId);
+            FullImageChatStore.putFullImage(message.id, action.fullImage);
+
             if(action.receiver.name == activeContactId) {
                 ChatMessageStore.emitUpdate();
             }
@@ -403,6 +442,8 @@ ChatMessageStore.dispatchToken = ChatDispatcher.register(function(action) {
             );
             activeContactId = ChatContactsStore.getActive();
             ChatMessageStore.addMessage(action.sender, message, activeContactId);
+            FullImageChatStore.putFullImage(message.id, action.fullImage);
+
             if(action.sender == activeContactId) {
                 ChatMessageStore.emitUpdate();
             }
@@ -462,13 +503,14 @@ UnreadChatMessageStore.dispatchToken = ChatDispatcher.register(function(action) 
 /*============================= Actions ==============================*/
 
 var OutgoingMessageAction = {
-    createMessage: function (message, sender, receiver, msgType) {
+    createMessage: function (message, sender, receiver, msgType, fullImage) {
         ChatDispatcher.dispatch({
             type: ActionTypes.NEW_OUT_MESSAGE,
             message: message,
             sender: sender,
             receiver: receiver,
-            msgType: msgType
+            msgType: msgType,
+            fullImage: fullImage
         });
         var msg = CoreUtils.createOutMessageFromRaw(
             message, sender, receiver, msgType);
@@ -478,17 +520,31 @@ var OutgoingMessageAction = {
 
 var IncomingMessageAction = {
     createMessage: function (message, sender, receiver, msgType, datetime) {
-        ChatDispatcher.dispatch({
-            type: ActionTypes.NEW_IN_MESSAGE,
-            message: message,
-            sender: sender,
-            receiver: receiver,
-            msgType: msgType,
-            datetime: datetime
-        });
-        var msg = CoreUtils.createInMessageFromRaw(
-            message, sender, receiver, msgType);
-        //Отправка на сервер
+        if(msgType == 'image'){
+            CoreUtils.getThumbnailBase64(message, function(b64string){
+                ChatDispatcher.dispatch({
+                    type: ActionTypes.NEW_IN_MESSAGE,
+                    message: b64string,
+                    sender: sender,
+                    receiver: receiver,
+                    msgType: msgType,
+                    datetime: datetime,
+                    fullImage: message
+                });
+            });
+        }else {
+            ChatDispatcher.dispatch({
+                type: ActionTypes.NEW_IN_MESSAGE,
+                message: message,
+                sender: sender,
+                receiver: receiver,
+                msgType: msgType,
+                datetime: datetime,
+                fullImage: null
+            });
+        }
+        //var msg = CoreUtils.createInMessageFromRaw(
+        //    message, sender, receiver, msgType);
     }
 };
 
@@ -601,30 +657,54 @@ var CoreUtils = {
         }
         return changed;
     },
-    inViewport: function(parent, node, centerIfNeeded){
-        var changed = false;
-        centerIfNeeded = arguments.length === 0 ? true : !!centerIfNeeded;
-        var parentComputedStyle = window.getComputedStyle(parent, null),
-            parentBorderTopWidth = parseInt(parentComputedStyle.getPropertyValue('border-top-width')),
-            parentBorderLeftWidth = parseInt(parentComputedStyle.getPropertyValue('border-left-width')),
-            overTop = node.offsetTop - parent.offsetTop < parent.scrollTop,
-            overBottom = (node.offsetTop - parent.offsetTop + node.clientHeight - parentBorderTopWidth) > (parent.scrollTop + parent.clientHeight),
-            overLeft = node.offsetLeft - parent.offsetLeft < parent.scrollLeft,
-            overRight = (node.offsetLeft - parent.offsetLeft + node.clientWidth - parentBorderLeftWidth) > (parent.scrollLeft + parent.clientWidth),
-            alignWithTop = overTop && !overBottom;
-
-        if ((overTop || overBottom) && centerIfNeeded) {
-            changed = true;
+    getCoefficient: function(width, height, limit){
+        var maxHW = Math.max(width, height);
+        var coefficient = 1;
+        if(maxHW > limit){
+            coefficient = maxHW / limit;
         }
+        return coefficient;
+    },
+    getThumbnailBase64: function(srcBase64, cb){
+        var self = this;
+        var canvas = document.createElement('canvas');
+        var image = new Image();
+        image.onload = function() {
+            var imgWidth = image.width;
+            var imgHeight = image.height;
 
-        if ((overLeft || overRight) && centerIfNeeded) {
-            changed = true;
-        }
+            var coefficient = self.getCoefficient(imgWidth, imgHeight, 1280);
+            canvas.width = imgWidth / coefficient;
+            canvas.height = imgHeight / coefficient;
 
-        if ((overTop || overBottom || overLeft || overRight) && !centerIfNeeded) {
-            changed = true;
-        }
-        return changed;
+            var ctx = canvas.getContext("2d");
+            ctx.drawImage(image,0,0,canvas.width, canvas.height);
+
+            coefficient = self.getCoefficient(imgWidth, imgHeight, 150);
+            canvas.width = imgWidth / coefficient;
+            canvas.height = imgHeight / coefficient;
+
+            ctx.drawImage(image,0,0,canvas.width, canvas.height);
+            var b64string = canvas.toDataURL("image/png");
+            canvas = image = null;
+            if(typeof cb == 'function') {
+                cb(b64string);
+            }
+        };
+        image.src = srcBase64;
+    },
+    downloadImage: function(fullBase64, title, nameOfFile){
+        var img = document.createElement('img');
+        img.src = fullBase64;
+
+        var a = document.createElement('a');
+        a.setAttribute("download", nameOfFile);
+        a.setAttribute("href", fullBase64);
+        a.appendChild(img);
+
+        var w = open();
+        w.document.title = title;
+        w.document.body.appendChild(a);
     }
 };
 
@@ -692,6 +772,12 @@ var UnreadMessageDelimeter = React.createClass({
 
 var UnreadIncomingMessage = React.createClass({
     scrolled: false,
+    _onDownloadMessages: function(e){
+        var message = FullImageChatStore.getFullImage(this.props.data.id);
+        CoreUtils.downloadImage(message, 'Image viewing', 'chat-thumbnail.png');
+        e.preventDefault();
+        e.stopPropagation();
+    },
     renderMessage: function(data){
         if(data.contentType == 'text'){
             return (
@@ -699,7 +785,9 @@ var UnreadIncomingMessage = React.createClass({
             );
         } else if(data.contentType == 'image'){
             return (
-                <img className="image-message" src={ data.message } />
+                <a href="#" onClick={this._onDownloadMessages} >
+                    <img className="image-message" src={ data.message } />
+                </a>
             );
         }
     },
@@ -740,6 +828,12 @@ var UnreadIncomingMessage = React.createClass({
 });
 
 var UnreadOutgoingMessage = React.createClass({
+    _onDownloadMessages: function(e){
+        var message = FullImageChatStore.getFullImage(this.props.data.id);
+        CoreUtils.downloadImage(message, 'Image viewing', 'chat-thumbnail.png');
+        e.preventDefault();
+        e.stopPropagation();
+    },
     renderMessage: function(data){
         if(data.contentType == 'text'){
             return (
@@ -747,7 +841,9 @@ var UnreadOutgoingMessage = React.createClass({
             );
         } else if(data.contentType == 'image'){
             return (
-                <img className="image-message" src={ data.message } />
+                <a href="#" onClick={this._onDownloadMessages} >
+                    <img className="image-message" src={ data.message } />
+                </a>
             );
         }
     },
@@ -790,6 +886,12 @@ var UnreadOutgoingMessage = React.createClass({
 
 
 var IncomingMessage = React.createClass({
+    _onDownloadMessages: function(e){
+        var message = FullImageChatStore.getFullImage(this.props.data.id);
+        CoreUtils.downloadImage(message, 'Image viewing', 'chat-thumbnail.png');
+        e.preventDefault();
+        e.stopPropagation();
+    },
     renderMessage: function(data){
         if(data.contentType == 'text'){
             return (
@@ -797,7 +899,9 @@ var IncomingMessage = React.createClass({
             );
         } else if(data.contentType == 'image'){
             return (
-                <img className="image-message" src={ data.message } />
+                <a href="#" onClick={this._onDownloadMessages} >
+                    <img className="image-message" src={ data.message } />
+                </a>
             );
         }
     },
@@ -827,8 +931,13 @@ var IncomingMessage = React.createClass({
 });
 
 var OutgoingMessage = React.createClass({
+    _onDownloadMessages: function(e){
+        var message = FullImageChatStore.getFullImage(this.props.data.id);
+        CoreUtils.downloadImage(message, 'Image viewing', 'chat-thumbnail.png');
+        e.preventDefault();
+        e.stopPropagation();
+    },
     operatorStatus: function () {
-        console.log('OutgoingMessage');
         if (this.props.data.operator) {
             return (
                 <i className="msg-badge">operator</i>
@@ -844,7 +953,9 @@ var OutgoingMessage = React.createClass({
             );
         } else if(data.contentType == 'image'){
             return (
-                <img className="image-message" src={ data.message } />
+                <a href="#" onClick={this._onDownloadMessages} >
+                    <img className="image-message" src={ data.message } />
+                </a>
             );
         }
     },
@@ -929,9 +1040,17 @@ var HistoryButton = React.createClass({
 });
 
 var UploadImageButton = React.createClass({
-    _onUploadedBase64: function(b64string){
+    getCoefficient: function(width, height, limit){
+        var maxHW = Math.max(width, height);
+        var coefficient = 1;
+        if(maxHW > limit){
+            coefficient = maxHW / limit;
+        }
+        return coefficient;
+    },
+    _onUploadedBase64: function(b64string, fullb64string){
         if(this.props.onImageBase64) {
-            this.props.onImageBase64(b64string);
+            this.props.onImageBase64(b64string, fullb64string);
         }
     },
     _onFileChange: function(e){
@@ -942,16 +1061,29 @@ var UploadImageButton = React.createClass({
         var file = $fileUpload.files[0];
         var fr = new FileReader();
         var self = this;
+
         fr.onload = function(){
             var img = new Image();
             img.onload = function(){
                 var canvas = self.refs.imageCanvas;
-                canvas.width = self.img.width;
-                canvas.height = self.img.height;
+                var imgWidth = self.img.width;
+                var imgHeight = self.img.height;
+                var coefficient = self.getCoefficient(imgWidth, imgHeight, 1280);
+                canvas.width = imgWidth / coefficient;
+                canvas.height = imgHeight / coefficient;
+
                 var ctx = canvas.getContext("2d");
-                ctx.drawImage(self.img,0,0);
+                ctx.drawImage(self.img,0,0,canvas.width, canvas.height);
+                var fullb64string = canvas.toDataURL("image/png");
+
+                coefficient = self.getCoefficient(imgWidth, imgHeight, 150);
+                canvas.width = imgWidth / coefficient;
+                canvas.height = imgHeight / coefficient;
+
+                ctx.drawImage(self.img,0,0,canvas.width, canvas.height);
                 var b64string = canvas.toDataURL("image/png");
-                self._onUploadedBase64(b64string);
+
+                self._onUploadedBase64(b64string, fullb64string);
             };
             img.src = fr.result;
             self.img = img;
@@ -960,16 +1092,16 @@ var UploadImageButton = React.createClass({
     },
     render: function() {
         return (
-            <i className={this.props.classes} style={{ position: 'relative'  }}>
-                <form action='#'>
+                <i className={this.props.classes} style={{ position: 'relative'  }}>
+                    <form action='#'>
                     <input style={{ opacity: 0, zIndex: 2, left: 0, top: 0, width: '100%', position: 'absolute' }}
                            ref="fileUpload"
                            type="file"
                            accept="image/*"
                            onChange={this._onFileChange}/>
-                </form>
-                <canvas ref="imageCanvas" style={{ display: 'none' }}></canvas>
-            </i>
+                    </form>
+                    <canvas ref="imageCanvas" style={{ display: 'none' }}></canvas>
+                </i>
         );
     }
 });
@@ -999,12 +1131,13 @@ var FooterBox = React.createClass({
             this.sendMessage();
         }
     },
-    _onImageUpload: function(b64string){
+    _onImageUpload: function(b64string, fullBase64string){
         OutgoingMessageAction.createMessage(
             b64string,
             this.props.operator,
             this.props.contact,
-            'image'
+            'image',
+            fullBase64string
         );
     },
     render: function() {
@@ -1532,6 +1665,7 @@ function RunIncomingMessages(){
                 date);
 
         } else if(currentContentType == 'image') {
+
             IncomingMessageAction.createMessage(
                 getRandomItem(ImageMessages),
                 contact.name,
