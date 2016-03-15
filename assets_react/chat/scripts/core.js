@@ -100,7 +100,8 @@ var ActionTypes = {
     NEW_IN_MESSAGE: 'NEW_IN_MESSAGE',
     READ_MESSAGE: 'READ_MESSAGE',
     CONTACT_MESSAGES_SCROLL: 'CONTACT_MESSAGES_SCROLL',
-    CONTACT_FILTER: 'CONTACT_FILTER'
+    CONTACT_FILTER: 'CONTACT_FILTER',
+    CLEAR_SELECTED_CONTACT: 'CLEAR_SELECTED_CONTACT'
 };
 
 var KeyConstants = {
@@ -159,9 +160,22 @@ var UnreadChatMessageStore = objectAssign({}, EventEmitter.prototype, {
         this.removeListener(ChatConstants.MESSAGE_CHANGE_EVENT, callback);
     },
 
+    _getUnreadMessageIds: function(id){
+        return (_messages[id] && _messages[id].unreadIds) || [];
+    },
+
     getCount: function(id) {
-        var messages = ChatMessageStore.getUnreadMessageIds(id);
+        var messages = this._getUnreadMessageIds(id);
         return messages.length;
+    },
+
+    getAll: function(){
+        var allCount = 0;
+        var keys = Object.keys(_messages);
+        for(var key in keys){
+            allCount += this.getCount(keys[key]);
+        }
+        return allCount;
     }
 });
 
@@ -204,18 +218,6 @@ var ChatMessageStore = objectAssign({}, EventEmitter.prototype, {
             }
         }
         _messages[id].messages[message.id] = message;
-    },
-
-    getUnreadMessageIds: function(id){
-        var MessageStoreItem = {
-            messages: {},
-            unreadIds: [],
-            firstUnreadMsgId: null
-        };
-        if(!_messages[id]){
-            _messages[id] = MessageStoreItem;
-        }
-        return _messages[id].unreadIds;
     },
 
     emitChange: function() {
@@ -296,6 +298,9 @@ var ChatMessageStore = objectAssign({}, EventEmitter.prototype, {
 });
 
 var ChatContactsStore = objectAssign({}, EventEmitter.prototype, {
+    getCountAll: function(){
+        return Object.keys(_contacts).length;
+    },
     getAll: function(){
         var result = [];
         if(_contactFilterPattern) {
@@ -319,6 +324,11 @@ var ChatContactsStore = objectAssign({}, EventEmitter.prototype, {
 
     setFilter: function(pattern){
         _contactFilterPattern = pattern;
+    },
+
+    clearContact: function(){
+        _preActiveContactId = _activeContactId;
+        _activeContactId = null;
     },
 
     emitChange: function() {
@@ -389,6 +399,10 @@ ChatContactsStore.dispatchToken = ChatDispatcher.register(function(action) {
         case ActionTypes.CONTACT_FILTER:
             ChatContactsStore.setFilter(action.pattern);
             ChatContactsStore.emitChange();
+            break;
+
+        case ActionTypes.CLEAR_SELECTED_CONTACT:
+            ChatContactsStore.clearContact();
             break;
 
         default:
@@ -563,6 +577,14 @@ var ClickContactAction = {
             type: ActionTypes.CLICK_CONTACT,
             prevContactId: _preActiveContactId,
             contactId: contactId
+        });
+    }
+};
+
+var ClearSelectedContactAction = {
+    createAction: function () {
+        ChatDispatcher.dispatch({
+            type: ActionTypes.CLEAR_SELECTED_CONTACT
         });
     }
 };
@@ -992,6 +1014,11 @@ var HeaderBox = React.createClass({
             this.props.onClose();
         }
     },
+    _minimizeClicked: function(e){
+        if(typeof this.props.onMinimize == 'function') {
+            this.props.onMinimize();
+        }
+    },
     render: function() {
         return (
             <div className="chat-header clearfix">
@@ -1004,17 +1031,22 @@ var HeaderBox = React.createClass({
                     </div>
                 </div>
                 <IconButton onClick={this.closeClicked} classes="fa fa-times header-icon"/>
-                <IconButton classes="fa fa-minus-square header-icon"/>
+                <IconButton onClick={this._minimizeClicked} classes="fa fa-minus-square header-icon"/>
             </div>
         );
     }
 });
 
 var EmptyHeaderBox = React.createClass({
+    _onMinimize: function(){
+        if(typeof this.props.onMinimize == 'function'){
+            this.props.onMinimize();
+        }
+    },
     render: function() {
         return (
             <div className="chat-header clearfix">
-                <IconButton classes="fa fa-minus-square header-icon"/>
+                <IconButton onClick={this._onMinimize} classes="fa fa-minus-square header-icon"/>
             </div>
         );
     }
@@ -1395,6 +1427,11 @@ var ConversationBox = React.createClass({
             this.props.onClose();
         }
     },
+    _onMinimize: function(){
+        if(typeof this.props.onMinimize == 'function'){
+            this.props.onMinimize();
+        }
+    },
     _onOutMessage: function(message){
         if (typeof this.props.onOutgoingMessage == 'function'){
             this.props.onOutgoingMessage(message);
@@ -1403,7 +1440,9 @@ var ConversationBox = React.createClass({
     render: function() {
         return (
             <div className="chat">
-                <HeaderBox contact={this.props.contact} count={this.props.messages.length} onClose={this._onClose}/>
+                <HeaderBox contact={this.props.contact} count={this.props.messages.length}
+                           onClose={this._onClose}
+                           onMinimize={this._onMinimize}/>
                 <HistoryBox contact={this.props.contact} messages={this.props.messages} />
                 <FooterBox operator={this.props.operator} contact={this.props.contact} onMessage={this._onOutMessage}/>
             </div>
@@ -1412,10 +1451,15 @@ var ConversationBox = React.createClass({
 });
 
 var EmptyConversationBox = React.createClass({
+    _onMinimize: function(){
+        if(typeof this.props.onMinimize == 'function'){
+            this.props.onMinimize();
+        }
+    },
     render: function() {
         return (
             <div className="chat">
-                <EmptyHeaderBox/>
+                <EmptyHeaderBox onMinimize={this._onMinimize}/>
                 <EmptyChatBox/>
             </div>
         );
@@ -1507,6 +1551,59 @@ var EmptyChatBox = React.createClass({
     }
 });
 
+var MinChatBox = React.createClass({
+    getInitialState: function() {
+        return {
+            clientsCount: ChatContactsStore.getCountAll(),
+            unreadCount: UnreadChatMessageStore.getAll()
+        };
+    },
+    componentDidMount: function() {
+        UnreadChatMessageStore.addChangeListener(this._onUnreadChange);
+        ChatContactsStore.addChangeListener(this._onContactsChanged);
+    },
+
+    componentWillUnmount: function() {
+        UnreadChatMessageStore.removeChangeListener(this._onUnreadChange);
+        ChatContactsStore.removeChangeListener(this._onContactsChanged);
+    },
+    _onContactsChanged: function(){
+        var count = ChatContactsStore.getCountAll();
+        this.setState({
+            clientsCount: count
+        })
+    },
+    _onUnreadChange: function(){
+        var count = UnreadChatMessageStore.getAll();
+        this.setState({
+            unreadCount: count
+        })
+    },
+    _maximizeClicked: function(){
+        if(typeof this.props.onMaximize == 'function'){
+            this.props.onMaximize();
+        }
+    },
+    render: function(){
+        return (
+            <div className="chat-container min-container clearfix">
+                <div className={"msg-count center-text bg-"+this.props.status}>
+                    <div className="status">
+                        <i className={"fa fa-circle " + this.props.status || 'offline' }></i>
+                        {this.props.status}
+                    </div>
+                    <div>Clients: <i className="clients-badge">{this.state.clientsCount}</i></div>
+                </div>
+                <div className="chat-info">
+                    New: <span className="msg-badge unread">{this.state.unreadCount}</span>
+                    <IconButton onClick={this._maximizeClicked}
+                                classes="fa fa-2x fa-plus-square maximize-icon"/>
+                </div>
+            </div>
+        )
+    }
+});
+
 var ChatBox = React.createClass({
     getInitialState: function() {
         return {
@@ -1515,7 +1612,8 @@ var ChatBox = React.createClass({
             messages: [],
             currentContact: {},
             operator: {
-                name: 'Ксения Оператор'
+                name: 'Ксения Оператор',
+                status: 'online'
             },
             unread: 0
         };
@@ -1581,6 +1679,22 @@ var ChatBox = React.createClass({
             messages:[],
             currentContact: {}
         });
+        ClearSelectedContactAction.createAction();
+    },
+    _onMinimize: function(){
+        this.setState({
+            chatState: 'min',
+            messages:[],
+            currentContact: {}
+        });
+        ClearSelectedContactAction.createAction();
+    },
+    _onMaximize: function(){
+        this.setState({
+            chatState: 'no-chat',
+            messages:[],
+            currentContact: {}
+        });
     },
     onOutgoingMessage: function(data){
         var operator = this.state.operator;
@@ -1594,6 +1708,11 @@ var ChatBox = React.createClass({
     },
     renderState: function(){
         switch(this.state.chatState || 'login'){
+            case 'min':
+                return (
+                    <MinChatBox onMaximize={this._onMaximize}
+                                status={this.state.operator.status}/>
+                );
             case 'login':
                 return (
                     <div id="chat-template" className="chat-container clearfix">
@@ -1608,6 +1727,7 @@ var ChatBox = React.createClass({
                                          operator={this.state.operator}
                                          messages={this.state.messages}
                                          onClose={this.onConversationClose}
+                                         onMinimize={this._onMinimize}
                                          onOutgoingMessage={this.onOutgoingMessage} />
                     </div>
                 );
@@ -1615,7 +1735,7 @@ var ChatBox = React.createClass({
                 return (
                     <div id="chat-template" className="chat-container clearfix">
                         <ContactsBox  contacts={this.state.contacts} onSelectClient={this.selectClient}/>
-                        <EmptyConversationBox/>
+                        <EmptyConversationBox onMinimize={this._onMinimize}/>
                     </div>
                 )
         }
