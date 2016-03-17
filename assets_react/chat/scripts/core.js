@@ -75,14 +75,15 @@ var _contacts = {
     }
 };
 
-var _fullMessageImages = {
-};
+var _fullMessageImages = {};
+var _chatParticipants = {};
 
 window._fullMessageImages = _fullMessageImages;
 
 var _activeContactId,
     _preActiveContactId,
-    _contactFilterPattern = '';
+    _contactFilterPattern = '',
+    _currentOperator;
 
 /*============================ Constants =================================*/
 var ChatConstants = {
@@ -90,7 +91,9 @@ var ChatConstants = {
     CONTACT_SELECT_EVENT: 'CONTACT_SELECT_EVENT',
     MESSAGE_UPDATE_EVENT: 'MESSAGE_UPDATE_EVENT',
     CONTACTS_CHANGE_EVENT: 'CONTACTS_CHANGE_EVENT',
-    FULL_IMAGES_CHANGE_EVENT: 'FULL_IMAGES_CHANGE_EVENT'
+    FULL_IMAGES_CHANGE_EVENT: 'FULL_IMAGES_CHANGE_EVENT',
+    OPERATOR_CHANGED: 'OPERATOR_CHANGED',
+    PARTICIPANTS_CHANGED: 'PARTICIPANTS_CHANGED'
 };
 
 var ActionTypes = {
@@ -101,7 +104,15 @@ var ActionTypes = {
     READ_MESSAGE: 'READ_MESSAGE',
     CONTACT_MESSAGES_SCROLL: 'CONTACT_MESSAGES_SCROLL',
     CONTACT_FILTER: 'CONTACT_FILTER',
-    CLEAR_SELECTED_CONTACT: 'CLEAR_SELECTED_CONTACT'
+    CLEAR_SELECTED_CONTACT: 'CLEAR_SELECTED_CONTACT',
+    AUTH_IN_ACTION: 'AUTH_IN_ACTION',
+    AUTH_SUCCESS: 'AUTH_SUCCESS',
+    AUTH_FAIL: 'AUTH_FAIL'
+};
+
+var AuthStatuses = {
+    SUCCESS: 1,
+    ERROR: 2
 };
 
 var KeyConstants = {
@@ -109,10 +120,88 @@ var KeyConstants = {
 };
 
 /*============================ Store =================================*/
+var AuthChatStore = objectAssign({}, EventEmitter.prototype, {
+
+    emitChange: function() {
+        this.emit(ChatConstants.OPERATOR_CHANGED);
+    },
+
+    /**
+     * @param {function} callback
+     */
+    addChangeListener: function(callback) {
+        this.on(ChatConstants.OPERATOR_CHANGED, callback);
+    },
+
+    /**
+     * @param {function} callback
+     */
+    removeChangeListener: function(callback) {
+        this.removeListener(ChatConstants.OPERATOR_CHANGED, callback);
+    },
+
+    setOperator: function(operatorData){
+       _currentOperator = operatorData;
+    },
+
+    getOperator: function() {
+        return _currentOperator;
+    },
+
+    getStatus: function(){
+        return this.status;
+    },
+
+    setStatus: function(status){
+        this.status = status;
+    }
+});
+
+
+var ParticipantsChatStore = objectAssign({}, EventEmitter.prototype, {
+
+    emitChange: function() {
+        this.emit(ChatConstants.PARTICIPANTS_CHANGED);
+    },
+
+    /**
+     * @param {function} callback
+     */
+    addChangeListener: function(callback) {
+        this.on(ChatConstants.PARTICIPANTS_CHANGED, callback);
+    },
+
+    /**
+     * @param {function} callback
+     */
+    removeChangeListener: function(callback) {
+        this.removeListener(ChatConstants.PARTICIPANTS_CHANGED, callback);
+    },
+
+    getParticipants: function(contactId){
+        return Object.keys(_chatParticipants[contactId] || {});
+    },
+
+    addParticipantFor: function(contactId, participantId){
+        var added = false;
+
+        if(!_chatParticipants[contactId]){
+            _chatParticipants[contactId] = {};
+        }
+
+        if(participantId != contactId) {
+            _chatParticipants[contactId][participantId] = 1;
+            added = true;
+        }
+        return added;
+    }
+
+});
+
 var FullImageChatStore = objectAssign({}, EventEmitter.prototype, {
 
     emitChange: function() {
-        this.emit(ChatConstants);
+        this.emit(ChatConstants.FULL_IMAGES_CHANGE_EVENT);
     },
 
     /**
@@ -209,15 +298,15 @@ var ChatMessageStore = objectAssign({}, EventEmitter.prototype, {
         return result;
     },
 
-    addMessage: function(id, message, activeId){
-        message.isRead = (activeId == id);
+    addMessage: function(senderId, message, activeId){
+        message.isRead = (activeId == senderId);
         if(!message.isRead){
-            _messages[id].unreadIds.push(message.id);
-            if(_messages[id].firstUnreadMsgId == null){
-                _messages[id].firstUnreadMsgId = message.id;
+            _messages[senderId].unreadIds.push(message.id);
+            if(_messages[senderId].firstUnreadMsgId == null){
+                _messages[senderId].firstUnreadMsgId = message.id;
             }
         }
-        _messages[id].messages[message.id] = message;
+        _messages[senderId].messages[message.id] = message;
     },
 
     emitChange: function() {
@@ -260,7 +349,8 @@ var ChatMessageStore = objectAssign({}, EventEmitter.prototype, {
         _lastMessageId++;
         var message = {
             id: 'm_' + _lastMessageId,
-            name: data.operator.name,
+            from: data.operator.name,
+            to: data.contact.name,
             message: data.data.message,
             contentType: data.type,
             msgType: 'out',
@@ -283,6 +373,11 @@ var ChatMessageStore = objectAssign({}, EventEmitter.prototype, {
     readMessages: function(id){
         var messages = _messages[id].messages;
         var unreadIds = _messages[id].unreadIds || (_messages[id].unreadIds = []);
+
+        var firstUnreadMsgId = _messages[id].firstUnreadMsgId;
+        if(firstUnreadMsgId){
+            messages[firstUnreadMsgId].firstUnread = false;
+        }
 
         for(var i = 0, len = unreadIds.length; i < len; i++){
             var message = messages[unreadIds[i]];
@@ -384,7 +479,38 @@ var ChatContactsStore = objectAssign({}, EventEmitter.prototype, {
 });
 
 /*============================ Dispatchers =================================*/
+AuthChatStore.dispatchToken = ChatDispatcher.register(function(action) {
+    switch (action.type) {
+        case ActionTypes.AUTH_SUCCESS:
+            AuthChatStore.setStatus(AuthStatuses.SUCCESS);
+            AuthChatStore.setOperator(action.operator);
+            AuthChatStore.emitChange();
+            break;
+        default:
+        // do nothing
+    }
+});
+
+ParticipantsChatStore.dispatchToken = ChatDispatcher.register(function(action) {
+    var added;
+    switch (action.type) {
+        case ActionTypes.NEW_IN_MESSAGE:
+        case ActionTypes.NEW_OUT_MESSAGE:
+            added = ParticipantsChatStore.addParticipantFor(action.receiver, action.sender);
+            if(added) {
+                ParticipantsChatStore.emitChange();
+            }
+            break;
+
+        default:
+        // do nothing
+    }
+});
+
 ChatContactsStore.dispatchToken = ChatDispatcher.register(function(action) {
+    ChatDispatcher.waitFor([
+        AuthChatStore.dispatchToken
+    ]);
     switch (action.type) {
         case ActionTypes.CLICK_CONTACT:
             ChatContactsStore.setActive(action.contactId);
@@ -452,10 +578,11 @@ ChatMessageStore.dispatchToken = ChatDispatcher.register(function(action) {
                 action.sender,
                 action.receiver,
                 action.msgType,
-                action.datetime
+                action.datetime,
+                action.isOperator
             );
             activeContactId = ChatContactsStore.getActive();
-            ChatMessageStore.addMessage(action.sender, message, activeContactId);
+            ChatMessageStore.addMessage(action.receiver, message, activeContactId);
             FullImageChatStore.putFullImage(message.id, action.fullImage);
 
             if(action.sender == activeContactId) {
@@ -532,18 +659,45 @@ var OutgoingMessageAction = {
     }
 };
 
+var AuthInProgressAction = {
+    createAction: function () {
+        ChatDispatcher.dispatch({
+            type: ActionTypes.AUTH_IN_ACTION
+        });
+    }
+};
+
+var AuthSuccessAction = {
+    createAction: function (operator) {
+        ChatDispatcher.dispatch({
+            type: ActionTypes.AUTH_SUCCESS,
+            operator: operator
+        });
+    }
+};
+
+var AuthFailAction = {
+    createAction: function (error) {
+        ChatDispatcher.dispatch({
+            type: ActionTypes.AUTH_FAIL,
+            error: error
+        });
+    }
+};
+
 var IncomingMessageAction = {
-    createMessage: function (message, sender, receiver, msgType, datetime) {
+    createMessage: function (message, sender, receiver, msgType, datetime, isOperator) {
         if(msgType == 'image'){
             CoreUtils.getThumbnailBase64(message, function(b64string){
                 ChatDispatcher.dispatch({
                     type: ActionTypes.NEW_IN_MESSAGE,
                     message: b64string,
                     sender: sender,
-                    receiver: receiver,
+                    receiver: receiver || sender,
                     msgType: msgType,
                     datetime: datetime,
-                    fullImage: message
+                    fullImage: message,
+                    isOperator: isOperator
                 });
             });
         }else {
@@ -551,10 +705,11 @@ var IncomingMessageAction = {
                 type: ActionTypes.NEW_IN_MESSAGE,
                 message: message,
                 sender: sender,
-                receiver: receiver,
+                receiver: receiver || sender,
                 msgType: msgType,
                 datetime: datetime,
-                fullImage: null
+                fullImage: null,
+                isOperator: isOperator
             });
         }
         //var msg = CoreUtils.createInMessageFromRaw(
@@ -629,7 +784,8 @@ var CoreUtils = {
         _lastMessageId++;
         return {
             id: 'm_' + _lastMessageId,
-            name: sender.name,
+            from: sender.name,
+            to: receiver.name,
             message: message,
             contentType: msgType,
             msgType: 'out',
@@ -639,15 +795,16 @@ var CoreUtils = {
         };
     },
 
-    createInMessageFromRaw: function(message, sender, receiver, msgType, datetime){
+    createInMessageFromRaw: function(message, sender, receiver, msgType, datetime, isOperator){
         _lastMessageId++;
         return {
             id: 'm_' + _lastMessageId,
-            name: sender,
+            from: sender,
+            to: receiver,
             message: message,
             contentType: msgType,
             msgType: 'in',
-            operator: false,
+            operator: isOperator,
             datetime: CoreUtils.formatDate(new Date(datetime)),
             isRead: false
         };
@@ -767,7 +924,7 @@ var EndConversationMessage = React.createClass({
                     <span className="message-data-time">
                         {this.props.time || getCurrentTime()}, {this.props.days || 'Today'}
                     </span> &nbsp;&nbsp;
-                    <span className="message-data-name">{this.props.name || 'Not specified' }
+                    <span className="message-data-name">{this.props.from || 'Not specified' }
                         <i className="msg-badge">operator</i>
                     </span>
                     <i className="fa fa-circle me"></i>
@@ -823,6 +980,22 @@ var UnreadIncomingMessage = React.createClass({
     canScroll: function(){
         return !this.scrolled;
     },
+    _operatorStatus: function () {
+        if (this.props.data.operator) {
+            return (
+                <i className="msg-badge">operator</i>
+            );
+        } else {
+            return '';
+        }
+    },
+    _operatorMsgClasses: function(){
+        if (this.props.data.operator) {
+            return ' other-operator';
+        } else {
+            return '';
+        }
+    },
     render: function() {
         var getCurrentTime = function (dt) {
             var resultDate = new Date(dt) || new Date();
@@ -835,13 +1008,14 @@ var UnreadIncomingMessage = React.createClass({
                 <div className="message-data">
                     <span className="message-data-name">
                         <i className={"fa fa-circle " + (this.props.status || 'offline')}></i>
-                        {this.props.data.name || 'Not specified'}
+                        {this.props.data.from || 'Not specified'}
+                        {this._operatorStatus()}
                     </span>
                     <span className="message-data-time">
                         {getCurrentTime(this.props.data.datetime) || getCurrentTime()}, {'Today'}
                     </span>
                 </div>
-                <div className="message my-message">
+                <div className={"message my-message" + this._operatorMsgClasses() }>
                     { this.renderMessage(this.props.data) }
                 </div>
             </li>
@@ -892,7 +1066,7 @@ var UnreadOutgoingMessage = React.createClass({
                         {getCurrentTime(this.props.data.datetime) || getCurrentTime()}, {'Today'}
                     </span> &nbsp;&nbsp;
                     <span className="message-data-name">
-                        {this.props.data.name || 'Empty sender'}
+                        {this.props.data.from || 'Empty sender'}
                         {this.operatorStatus()}
                     </span>
                     &nbsp;&nbsp;
@@ -927,6 +1101,22 @@ var IncomingMessage = React.createClass({
             );
         }
     },
+    operatorStatus: function () {
+        if (this.props.data.operator) {
+            return (
+                <i className="msg-badge">operator</i>
+            );
+        } else {
+            return '';
+        }
+    },
+    _operatorMsgClasses: function(){
+        if (this.props.data.operator) {
+            return ' other-operator';
+        } else {
+            return '';
+        }
+    },
     render: function() {
         var getCurrentTime = function (dt) {
             var resultDate = new Date(dt) || new Date();
@@ -938,13 +1128,14 @@ var IncomingMessage = React.createClass({
                 <div className="message-data">
                     <span className="message-data-name">
                         <i className={"fa fa-circle " + (this.props.status || 'offline')}></i>
-                        {this.props.data.name || 'Not specified'}
+                        {this.props.data.from || 'Not specified'}
+                        {this.operatorStatus()}
                     </span>
                     <span className="message-data-time">
                         {getCurrentTime(this.props.data.datetime) || getCurrentTime()}, {'Today'}
                     </span>
                 </div>
-                <div className="message my-message">
+                <div className={"message my-message" + this._operatorMsgClasses()}>
                     { this.renderMessage(this.props.data) }
                 </div>
             </li>
@@ -994,7 +1185,7 @@ var OutgoingMessage = React.createClass({
                         {getCurrentTime(this.props.data.datetime) || getCurrentTime()}, {'Today'}
                     </span> &nbsp;&nbsp;
                     <span className="message-data-name">
-                        {this.props.data.name || 'Empty sender'}
+                        {this.props.data.from || 'Empty sender'}
                         {this.operatorStatus()}
                     </span>
                     &nbsp;&nbsp;
@@ -1273,16 +1464,19 @@ var Contact = React.createClass({
         return {
             data: this.props.data || {},
             active: false,
-            unread: unreadCount
+            unread: unreadCount,
+            participants: ''
         }
     },
 
     componentDidMount: function() {
         UnreadChatMessageStore.addChangeListener(this._onUnreadChange);
+        ParticipantsChatStore.addChangeListener(this._participantsChange);
     },
 
     componentWillUnmount: function() {
         UnreadChatMessageStore.removeChangeListener(this._onUnreadChange);
+        ParticipantsChatStore.removeChangeListener(this._participantsChange);
     },
 
     _onUnreadChange: function(){
@@ -1292,6 +1486,31 @@ var Contact = React.createClass({
         });
     },
 
+    _participantsChange: function(){
+        var data = ParticipantsChatStore.getParticipants(this.state.data.name);
+        if(data.length > 0) {
+            this.setState({
+                participants: data
+            });
+        }
+    },
+    _getParticipants: function(){
+        if(this.state.participants) {
+            return (
+                <span>
+                {
+                    this.state.participants.map(function (name, index) {
+                        return (
+                            <span key={index} className="msg-badge badge-sm">{name}</span>
+                        );
+                    })
+                }
+                </span>
+            );
+
+        }
+        return '';
+    },
     activateContact: function(){
         if(typeof this.props.onActivate == 'function'){
             this.props.onActivate(this.state.data);
@@ -1320,6 +1539,9 @@ var Contact = React.createClass({
                     <div className="status">
                         <i className={"fa fa-circle " + this.state.data.status || 'offline' }></i>
                         {this.state.data.status || 'offline'}
+                    </div>
+                    <div>
+                        {this._getParticipants()}
                     </div>
                     <div className="msg-unread">
                         {this.getUnreadMessageCount()}
@@ -1467,8 +1689,28 @@ var EmptyConversationBox = React.createClass({
 });
 
 var LoginBox = React.createClass({
+    componentDidMount: function() {
+        AuthChatStore.addChangeListener(this._onAuthChanged);
+    },
+
+    componentWillUnmount: function() {
+        AuthChatStore.removeChangeListener(this._onAuthChanged);
+    },
+
     getInitialState: function() {
         return {loginState: this.props.initialLoginState || 'login'};
+    },
+    _onAuthChanged: function(){
+        if(AuthChatStore.getStatus() === AuthStatuses.SUCCESS) {
+            this.successState();
+            if(typeof this.props.onAuthSuccess == 'function') {
+                setTimeout(function(){
+                    this.props.onAuthSuccess(AuthChatStore.getOperator());
+                }.bind(this), 1000);
+            }
+        }else{
+            this.tryAgainState();
+        }
     },
     progressState: function(){
         this.setState({
@@ -1485,19 +1727,9 @@ var LoginBox = React.createClass({
             loginState: 'login'
         });
     },
-    authenticateOperator: function(){
-        setTimeout(function() {
-            this.successState();
-            setTimeout(function() {
-                if(typeof this.props.onAuthSuccess == 'function') {
-                    this.props.onAuthSuccess();
-                }
-            }.bind(this), 1000); //4000
-        }.bind(this), 1500); //3000
-    },
     loginClick: function(e){
         this.progressState();
-        this.authenticateOperator();
+        ServerAPI.authOperator();
     },
     renderState: function(){
         switch(this.state.loginState){
@@ -1611,10 +1843,7 @@ var ChatBox = React.createClass({
             contacts: [],
             messages: [],
             currentContact: {},
-            operator: {
-                name: 'Ксения Оператор',
-                status: 'online'
-            },
+            operator: {},
             unread: 0
         };
     },
@@ -1658,13 +1887,13 @@ var ChatBox = React.createClass({
             messages: ChatMessageStore.getMessages(contact.name)
         });
     },
-    authSuccess: function(){
+    authSuccess: function(operator){
         this.setState({
+            operator: operator,
             chatState: 'no-chat'
         });
+
         this.loadContacts();
-        //TODO: Tests
-        RunIncomingMessages();
     },
     selectClient: function(client){
         this.setState({
@@ -1762,6 +1991,8 @@ function RunIncomingMessages(){
         'An SEO expert walks into a bar, bars, pub, tavern, public house, Irish pub, drinks, beer, alcohol'
     ];
     var contentType = ['text', 'text', 'image'];
+    var isOperator = [0,0,0,0,0,1];
+    var operatorNames = ['Лена','Валентина','Алина','Настя']
 
     function getRandomItem (arr) {
         var keys = Object.keys(arr);
@@ -1775,25 +2006,60 @@ function RunIncomingMessages(){
         var date = CoreUtils.formatDate(new Date());
 
         var currentContentType = getRandomItem(contentType);
+        var sender = '';
+        var receiver = '';
+        var isOperatorFlag = false;
+
+        if(getRandomItem(isOperator)){
+            sender = getRandomItem(operatorNames);
+            receiver = contact.name;
+            isOperatorFlag = true;
+        }else{
+            sender = contact.name;
+            receiver = '';
+            isOperatorFlag = false;
+        }
+
         if(currentContentType == 'text') {
 
             IncomingMessageAction.createMessage(
                 getRandomItem(messageResponses),
-                contact.name,
-                '',
+                sender,
+                receiver,
                 'text',
-                date);
+                date,
+                isOperatorFlag
+            );
 
         } else if(currentContentType == 'image') {
 
             IncomingMessageAction.createMessage(
                 getRandomItem(ImageMessages),
-                contact.name,
-                '',
+                sender,
+                receiver,
                 'image',
-                date);
+                date,
+                isOperatorFlag
+            );
         }
 
         index++;
     }, 2000);
 }
+
+/*============================ API ===================================*/
+
+var ExampleServerApi = objectAssign({}, Object.prototype, {
+    authOperator: function(){
+        var testOperator = {name: 'Ксения', status: 'online'};
+        AuthInProgressAction.createAction();
+        setTimeout(function() {
+            AuthSuccessAction.createAction(testOperator);
+            setTimeout(function(){
+                RunIncomingMessages();
+            }, 1000)
+        }, 1500);
+    }
+});
+
+var ServerAPI = ExampleServerApi;
