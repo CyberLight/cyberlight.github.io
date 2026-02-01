@@ -13,7 +13,7 @@ const TERMINAL_DATA = [
   { type: 'info', text: 'Password: ******************', waitAfter: 1500 },
   { type: 'user_change', user: 'cyberlight', machine: 'cyberlight-vm', path: '/' },
   { type: 'typing', text: 'ls', waitAfter: 500 },
-  { type: 'files', files: ['me', 'README.md', 'github'], waitAfter: 800 },
+  { type: 'files', files: ['me', 'README.md', 'github', 'certificates'], waitAfter: 800 },
   { type: 'typing', text: 'cat README.md', waitAfter: 500 },
   { type: 'branch_change', branch: 'feature/bio', waitAfter: 0 },
   { type: 'info', text: 'I am Cyberlight in virtual reality', waitAfter: 100 },
@@ -24,6 +24,18 @@ const TERMINAL_DATA = [
   { type: 'branch_change', branch: 'release/socials', waitAfter: 0 },
   { type: 'typing', text: 'cat github', waitAfter: 500 },
   { type: 'link', text: 'https://github.com/CyberLight', url: 'https://github.com/CyberLight', waitAfter: 1000 },
+  { type: 'typing', text: 'ls ./certificates', waitAfter: 500 },
+  { 
+      type: 'pdf_list', 
+      files: [
+          { name: 'coderun_winter_challenge_2025.pdf', url: 'https://cdn.jsdelivr.net/gh/CyberLight/CyberLight@main/certificates/yandex/10010469-4d2f-e5fb-a2c7-1a89691e7577.pdf' },
+          { name: 'coderun_boost_challenge_2025.pdf', url: 'https://cdn.jsdelivr.net/gh/CyberLight/CyberLight@main/certificates/yandex/10010468-836f-67f6-b864-d4b896d8fb7c.pdf' },
+          { name: 'coderun_season2_2024.pdf', url: 'https://cdn.jsdelivr.net/gh/CyberLight/CyberLight@main/certificates/yandex/10010466-e859-d416-1a92-bc85dd3baa9a.pdf' },
+          { name: 'coderun_season1_2023.pdf', url: 'https://cdn.jsdelivr.net/gh/CyberLight/CyberLight@main/certificates/yandex/bf6a87db-4c95-4092-bc33-9e9b3497c114.pdf' },
+      ], 
+      waitAfter: 1000 
+  },
+  { type: 'info', text: '(Click on files to open viewer)', waitAfter: 500 },
   { type: 'branch_change', branch: 'release/me', waitAfter: 0 },
   { type: 'input' }
 ];
@@ -97,7 +109,34 @@ const TypingLine = ({ text, onFinish, userContext, speed = 50 }) => {
   );
 };
 
+const PdfViewer = ({ fileUrl, onClose }) => {
+  return (
+    <div className="pdf-overlay" onClick={onClose}>
+      <div className="pdf-window" onClick={(e) => e.stopPropagation()}>
+        <div className="pdf-header">
+           <span>📄 Viewer: {fileUrl.split('/').pop()}</span>
+           <button className="close-btn" onClick={onClose}>✖</button>
+        </div>
+        
+        <div className="pdf-content">
+            <object data={fileUrl} type="application/pdf" width="100%" height="100%">
+                <p>Ваш браузер не может показать PDF. 
+                <a href={fileUrl} target="_blank" rel="noreferrer">Скачать файл</a>.</p>
+            </object>
+        </div>
+        
+        <div className="pdf-footer">
+            <a href={fileUrl} target="_blank" rel="noreferrer" className="open-ext-btn">
+                Открыть в новой вкладке ↗
+            </a>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 function App() {
+  const [viewingPdf, setViewingPdf] = useState(null);
   const [currentBranch, setCurrentBranch] = useState('main');
   const [lines, setLines] = useState([]); 
   const [currentLineIndex, setCurrentLineIndex] = useState(0);
@@ -139,6 +178,25 @@ function App() {
             newLine = (
                 <div key={currentLineIndex} className="line">
                     <a href={data.url} target="_blank" className="link">{data.text}</a>
+                </div>
+            );
+            break;
+        case 'pdf_list':
+            newLine = (
+                <div key={currentLineIndex} className="line">
+                    <div className="simple-arrow">➜</div>
+                    <div style={{display: 'flex', gap: '15px', flexWrap: 'wrap', marginLeft: '1em'}}>
+                        {data.files.map((f, i) => (
+                            <span 
+                                key={i} 
+                                className="file-item fof-no-ml" 
+                                style={{cursor: 'pointer', textDecoration: 'underline'}}
+                                onClick={() => setViewingPdf(f.url)}
+                            >
+                                📄 {f.name}
+                            </span>
+                        ))}
+                    </div>
                 </div>
             );
             break;
@@ -216,6 +274,9 @@ function App() {
         {renderActive()}
         <div ref={(el) => { if(el) el.scrollIntoView({ behavior: "smooth" }); }}></div>
       </div>
+      {viewingPdf && (
+        <PdfViewer fileUrl={viewingPdf} onClose={() => setViewingPdf(null)} />
+      )}
     </div>
   );
 }
