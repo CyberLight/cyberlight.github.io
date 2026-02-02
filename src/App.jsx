@@ -41,12 +41,7 @@ const TERMINAL_DATA = [
 ];
 
 const Cursor = () => {
-  const [visible, setVisible] = useState(true);
-  useEffect(() => {
-    const interval = setInterval(() => setVisible(v => !v), 500);
-    return () => clearInterval(interval);
-  }, []);
-  return <span className={`cursor ${visible ? '' : 'hidden'}`}>&nbsp;</span>;
+  return <span className="cursor">&nbsp;</span>;
 };
 
 const ZshPrompt = ({ user, machine, path, branch }) => {
