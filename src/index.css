@@ -130,6 +130,8 @@ body {
   margin-bottom: 0.4em;
   line-height: 1;
   flex-shrink: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .prompt-wrapper {
@@ -254,6 +256,7 @@ body {
   color: var(--gray-color);
   align-self: center;
   margin-left: 1em;
+  white-space: pre-wrap;
 }
 
 .link {
@@ -288,6 +291,8 @@ body {
   position: relative;
   color: #fff;
   font-weight: bold;
+  flex-wrap: wrap;
+  max-width: 100%;
 }
 
 .zsh-segment::after {
@@ -331,6 +336,17 @@ body {
   border-left-color: #27ae60;
 }
 
+.seg-yellow {
+  background-color: #f1c40f;
+  color: #000;
+}
+
+.seg-yellow::after {
+  border-left-color: #f1c40f;
+  transform: translateZ(0);
+}
+
+
 .zsh-segment {
   z-index: 10;
 }
@@ -343,13 +359,16 @@ body {
   z-index: 8;
 }
 
+.zsh-segment:nth-child(4) {
+  z-index: 7;
+}
+
 .simple-arrow {
   color: #27ae60;
   margin-right: 10px;
   font-weight: bold;
 }
 
-/* --- МОДАЛЬНОЕ ОКНО PDF --- */
 .pdf-overlay {
   position: fixed;
   top: 0;
@@ -357,14 +376,11 @@ body {
   width: 100%;
   height: 100%;
   background-color: rgba(0, 0, 0, 0.85);
-  /* Сильное затемнение фона */
   z-index: 1000;
-  /* Поверх всего */
   display: flex;
   justify-content: center;
   align-items: center;
   backdrop-filter: blur(5px);
-  /* Размытие фона (Cyberpunk style) */
 }
 
 .pdf-window {
@@ -450,6 +466,43 @@ body {
   letter-spacing: 0.5px;
   pointer-events: none;
   text-shadow: 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.text-green {
+  color: #27ae60;
+  font-weight: bold;
+}
+
+.text-red {
+  color: #ff5f56;
+  font-weight: bold;
+}
+
+.text-blue {
+  color: #4a90e2;
+  font-weight: bold;
+}
+
+.text-yellow {
+  color: #f1c40f;
+  font-weight: bold;
+}
+
+.text-gray {
+  color: #666;
+}
+
+.text-purple {
+  color: #bd93f9;
+}
+
+.text-white {
+  color: white;
+}
+
+.text-cmd {
+  color: #fff;
+  font-weight: bold;
 }
 
 @media (max-width: 1024px) {
