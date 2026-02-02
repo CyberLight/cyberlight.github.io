@@ -264,6 +264,10 @@ function App() {
 
   return (
     <div className="terminal-window">
+      <div className="window-title">
+         <span style={{marginRight: '6px'}}>🏠</span> 
+         cyberlight-vm — -zsh
+      </div>
       <div className="terminal-content">
         {lines}
         {renderActive()}
